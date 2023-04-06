@@ -1,0 +1,21 @@
+CUDA_VISIBLE_DEVICES=0,1,2,3 
+python gpt_pretrain.py    \
+    --save_prefix final_gpt2_large_check_bs512_lr0.0020_warmup3k_seqlen1024_debug \
+    --gpu_count -1 \
+    --model gpt2 \
+    --tokenizer gpt2 \
+    --batch_size 4 \
+    --grad_accum 32 \
+    --lr 0.002006911598778545 \
+    --warmup_steps 3000 \
+    --train_steps 250000 \
+    --val_every 50 \
+    --val_batches 50 \
+    --fp16 \
+    --seqlen 1024 \
+    --log_rate 10 \
+    --num_workers 4 \
+    --size GPT2_large \
+    --random \
+    --use_local_cache \
+    --data_type tfrecord \
