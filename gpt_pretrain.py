@@ -604,7 +604,12 @@ class MMapTextDataset(Dataset):
             >>> python scripts/pretrain.py --input_dir dirWithTextFiles --train_dev_split 0.05  \
                                            --shard_size  268435456  --num_preprocessing_workers 16
         """
-        MMapTextDataset.tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
+        if args.use_local_cache:
+            local_cache_path = f"/n/home05/wk247/workspace/staged-training/local_cache/{args.tokenizer}"
+            assert os.path.exists(local_cache_path), f"{local_cache_path} doesn't exist"
+            MMapTextDataset.tokenizer = AutoTokenizer.from_pretrained(local_cache_path, use_fast=True)
+        else:
+            MMapTextDataset.tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
         assert len(MMapTextDataset.tokenizer) < 65535  # will use uint16 to store token ids
         all_files = glob.glob(f'{args.input_dir}/c4-*')
         print(len(all_files), MMapTextDataset.tokenizer)
@@ -1022,7 +1027,12 @@ class Pretrainer(ptl.LightningModule):
         # self.hparams = self.args
 
         #self.model = AutoModelForMaskedLM.from_pretrained(args.model)
-        self.model = AutoModelForCausalLM.from_pretrained(args.model)
+        if args.use_local_cache:
+            local_cache_path = f"/n/home05/wk247/workspace/staged-training/local_cache/{args.tokenizer}"
+            assert os.path.exists(local_cache_path), f"{local_cache_path} doesn't exist"
+            self.model = AutoModelForCausalLM.from_pretrained(local_cache_path)
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(args.model)
         if args.random:
             if args.layers is not None and args.size is not None:
                 raise False
@@ -1073,7 +1083,13 @@ class Pretrainer(ptl.LightningModule):
             assert args.layers is None
             assert args.size is None
 
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
+        # local cache
+        if args.use_local_cache:
+            local_cache_path = f"/n/home05/wk247/workspace/staged-training/local_cache/{args.tokenizer}"
+            assert os.path.exists(local_cache_path), f"{local_cache_path} doesn't exist"
+            tokenizer = AutoTokenizer.from_pretrained(local_cache_path)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
         self.pad_token_id = tokenizer.pad_token_id
         self.eos_token_id = tokenizer.eos_token_id or tokenizer.sep_token_id
         self.bos_token_id = tokenizer.bos_token_id or tokenizer.cls_token_id
@@ -1253,10 +1269,15 @@ class Pretrainer(ptl.LightningModule):
     @staticmethod
     def add_args(parser):
         parser.add_argument("--seed", type=int, default=3)
+        
+        # custom args
+        parser.add_argument("--use_local_cache", action='store_true', default=False, help='if https connection is blocked, load tokenizer and model locally')
 
         # Dataset. Some of these params are only useful when generating the dataset cache
-        parser.add_argument("--input_dir", type=str, default='/net/nfs2.allennlp/shengs/c4/')
-        parser.add_argument("--output_dir", type=str, default='/net/nfs2.allennlp/shengs/c4/')
+        parser.add_argument("--input_dir", type=str, default='/n/home05/wk247/workspace/staged-training/local_cache/data/c4')
+        parser.add_argument("--output_dir", type=str, default='/n/home05/wk247/workspace/staged-training/local_cache/data/c4')
+        # parser.add_argument("--input_dir", type=str, default='/n/tata_ddos_ceph/woojeong/data/c4')
+        # parser.add_argument("--output_dir", type=str, default='/n/tata_ddos_ceph/woojeong/data/c4')
         
         parser.add_argument("--data_type", type=str, default='tfrecord')
         parser.add_argument("--add_sep_after_doc", action='store_true', default=False, help='add sep token after document')
