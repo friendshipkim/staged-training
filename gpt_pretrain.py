@@ -33,7 +33,7 @@ try:
 except ImportError:
     amp = None
 
-import tensorflow as tf
+# import tensorflow as tf
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -497,6 +497,7 @@ class MMapTextDataset(Dataset):
     def _process_file(full_fname):
         "Step 1: tokenize an input text file then save token ids into `np.memmap` shards of size `args.shard_size`"
         fname = full_fname.split('/')[-1]
+        # print(f"fname: {fname}")
         if args.data_type == 'tfrecord':
             log_filename = f'{args.output_dir}/logs-{fname}.log'
         elif args.data_type == 'raw_text':
@@ -526,31 +527,39 @@ class MMapTextDataset(Dataset):
             else:
                 raise NotImplementedError
             logging.info(f'Writing {len(token_list)} tokens to shared {shared_filename}')
+            # breakpoint()
             fp = np.memmap(shared_filename, dtype=np.uint16, mode='w+', shape=len(token_list))
             fp[:] = token_list[:]
             del fp  # flush and close file
     
         token_list = []
         shard_count = 0
-        tokens_count = 0    
+        tokens_count = 0
 
         if args.data_type == 'raw_text':  # the input file is one doc per line
             with open(full_fname, 'r') as fin:
-                for line in tqdm(fin):
+                for line_num, line in enumerate(tqdm(fin)):
                     line = line.strip()
                     if line == '':  # drop empty lines
                         continue
                     tokens = MMapTextDataset.tokenizer.encode(line, add_special_tokens=False)  # `__getitem__` adds special tokens
+                    # print(f"line number: {line_num}, {len(tokens)} tokens")
+                    
                     token_list.extend(tokens)
+                    # print(f"current token list: {len(token_list)}")
+                    
                     if len(token_list) > args.shard_size:
+                        # print("more tokens than shard_size")
                         _write_shard()
                         tokens_count += len(token_list)
                         token_list = []
                         shard_count += 1
                     else:
-                        token_list.append(MMapTextDataset.tokenizer.sep_token_id)
+                        # print("less tokens than shard_size, add sep_token")
+                        # TODO: check sep_token for gpt
+                        token_list.append(MMapTextDataset.tokenizer.bos_token_id)  #sep_token_id)
                 _write_shard()
-                tokens_count += len(token_list)
+                tokens_count += len(token_list)       
         elif args.data_type == 'tfrecord':  # the input file is tfrecord format of the c4 dataset
             fin = tf.data.TFRecordDataset(full_fname)
             for raw_example in tqdm(iter(fin), disable=process_identity != 1):
@@ -580,7 +589,7 @@ class MMapTextDataset(Dataset):
         last_token_index = 0
         for filename in tqdm(shards_list):
             shared = np.memmap(filename, mode='r', dtype=np.uint16)
-            all_token_ids[last_token_index:last_token_index+len(shared)] = shared[:]
+            all_token_ids[last_token_index:last_token_index + len(shared)] = shared[:]
             last_token_index += len(shared)
         fp = np.memmap(output_fname, dtype=np.uint16, mode='w+', shape=total_size)
         fp[:] = all_token_ids[:]
@@ -611,23 +620,17 @@ class MMapTextDataset(Dataset):
         else:
             MMapTextDataset.tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
         assert len(MMapTextDataset.tokenizer) < 65535  # will use uint16 to store token ids
-        all_files = glob.glob(f'{args.input_dir}/c4-*')
-        print(len(all_files), MMapTextDataset.tokenizer)
+        all_files = glob.glob(f'{args.input_dir}/en-subset2/*')
+        logger.info(f"num of files: {len(all_files)}")
+        logger.info(f"tokenizer: {MMapTextDataset.tokenizer}")
         if os.path.exists(f'{args.output_dir}/cache/train.bin') and os.path.exists(f'{args.input_dir}/cache/val.bin'):
             logger.info("Cache already exists. Remove the cache directory to regenerate")
             return
-        try:
-            os.mkdir(f'{args.output_dir}/cache/')
-        except FileExistsError:
-            pass
-        try:
-            os.mkdir(f'{args.output_dir}/shards-{args.shard_size}/')
-        except FileExistsError:
-            pass
-        try:
-            os.mkdir(f'{args.output_dir}/logs-{args.shard_size}/')  # log progrss to be able to resume
-        except FileExistsError:
-            pass
+        
+        # make dirs
+        os.makedirs(f'{args.output_dir}/cache/', exist_ok=True)
+        os.makedirs(f'{args.output_dir}/shards-{args.shard_size}/', exist_ok=True)
+        os.makedirs(f'{args.output_dir}/logs-{args.shard_size}/', exist_ok=True)  # log progrss to be able to resume
 
         # STEP1: tokenizing and saving to shards
         if args.num_preprocessing_workers > 1:
@@ -1207,9 +1210,9 @@ class Pretrainer(ptl.LightningModule):
                           correct_bias=False)
         if self.args.restart_warmup_steps != 0 and self.args.restart_steps != 0:
             scheduler = get_restart_linear_schedule_with_warmup(
-            optimizer, num_warmup_steps=self.args.warmup_steps, num_training_steps=self.args.train_steps, 
-            restart_steps=self.args.restart_steps, restart_warmup_steps=self.args.restart_warmup_steps,
-        )
+                optimizer, num_warmup_steps=self.args.warmup_steps, num_training_steps=self.args.train_steps, 
+                restart_steps=self.args.restart_steps, restart_warmup_steps=self.args.restart_warmup_steps,
+            )
         else:
             scheduler = get_linear_schedule_with_warmup(
             optimizer, num_warmup_steps=self.args.warmup_steps, num_training_steps=self.args.train_steps
