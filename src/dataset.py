@@ -1,19 +1,19 @@
 import torch
 import os
-import tqdm
 import glob
 import random
+import logging
 import multiprocessing
 
 # import tensorflow as tf
 import numpy as np
-from itertools import repeat
+from tqdm import tqdm
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-import logging
 
 logger = logging.getLogger(__name__)
+global_args = None
 
 
 # the dataset object we are using
@@ -44,7 +44,7 @@ class MMapTextDataset(Dataset):
 
     # ========================= preprocessing code ========================= #
     @staticmethod
-    def _process_file(args, full_fname):
+    def _process_file(full_fname):
         "Step 1: tokenize an input text file then save token ids into `np.memmap` shards of size `args.shard_size`"
         fname = full_fname.split("/")[-1]
         # print(f"fname: {fname}")
@@ -147,7 +147,7 @@ class MMapTextDataset(Dataset):
         del fp
 
     @staticmethod
-    def raw_text_to_mmap(args):
+    def raw_text_to_mmap(local_args):
         """This is the main preprocessing function. It processes all the text files in `args.input_dir` and
         outputs two np.memmap files, one for training and one for validation with ratio `args.train_dev_split`.
         Processing each input file involves tokenizing it, sharding it into shards of size `args.shard_size`,
@@ -164,6 +164,9 @@ class MMapTextDataset(Dataset):
             >>> python scripts/pretrain.py --input_dir dirWithTextFiles --train_dev_split 0.05  \
                                            --shard_size  268435456  --num_preprocessing_workers 16
         """
+        global args
+        args = local_args
+        
         if args.use_local_cache:
             local_cache_path = f"/n/home05/wk247/workspace/staged-training/local_cache/{args.tokenizer}"
             assert os.path.exists(local_cache_path), f"{local_cache_path} doesn't exist"
@@ -171,9 +174,9 @@ class MMapTextDataset(Dataset):
         else:
             MMapTextDataset.tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
         assert len(MMapTextDataset.tokenizer) < 65535  # will use uint16 to store token ids
-        all_files = glob.glob(f"{args.input_dir}/en-subset2/*")
-        logger.info(f"num of files: {len(all_files)}")
-        logger.info(f"tokenizer: {MMapTextDataset.tokenizer}")
+        all_files = glob.glob(f"{args.input_dir}/en-processed/*")
+        logger.info(f"Total number of files: {len(all_files)}")
+        logger.info(f"Tokenizer - {MMapTextDataset.tokenizer}")
         if os.path.exists(f"{args.output_dir}/cache/train.bin") and os.path.exists(f"{args.input_dir}/cache/val.bin"):
             logger.info("Cache already exists. Remove the cache directory to regenerate")
             return
@@ -184,24 +187,43 @@ class MMapTextDataset(Dataset):
         os.makedirs(f"{args.output_dir}/logs-{args.shard_size}/", exist_ok=True)  # log progrss to be able to resume
 
         # STEP1: tokenizing and saving to shards
-        if args.num_preprocessing_workers > 1:
-            from multiprocessing.pool import Pool
+        # run only if shards-{args.shard_size} directory is empty
+        all_shards = glob.glob(f"{args.output_dir}/shards-{args.shard_size}/*.bin")
+        if len(all_shards) == 0:
+            if args.num_preprocessing_workers > 1:
+                from multiprocessing.pool import Pool
 
-            with Pool(args.num_preprocessing_workers) as p:
-                list(tqdm(p.imap(MMapTextDataset._process_file, zip(repeat(args), all_files)), total=len(all_files)))
+                with Pool(args.num_preprocessing_workers) as p:
+                    list(tqdm(p.imap(MMapTextDataset._process_file, all_files), total=len(all_files)))
+            else:
+                [MMapTextDataset._process_file(f) for f in tqdm(all_files)]
+                
+            if args.shard_only:
+                exit()
         else:
-            [MMapTextDataset._process_file(args, f) for f in tqdm(all_files)]
+            pass
 
         if args.data_type == "raw_text":  # c4 tfrecords are already sharded
             # STEP2: shuffling shards and combining them into train.bin and val.bin files
-            all_shards = glob.glob(f"{args.output_dir}/shards-{args.shard_size}/*.bin")
-            random.shuffle(all_shards)  # shuffling based on shards not individual lines
-            val_shards_count = int(args.train_dev_split * len(all_shards))
-            val_shards = all_shards[:val_shards_count]
-            train_shards = all_shards[val_shards_count:]
+            
+            # TODO: check this
+            # use original c4 splits
+            train_shards = glob.glob(f"{args.output_dir}/shards-{args.shard_size}/c4-train.*.bin")
+            val_shards = glob.glob(f"{args.output_dir}/shards-{args.shard_size}/c4-validation.*.bin")
+            
+            # # use custom split
+            # all_shards = glob.glob(f"{args.output_dir}/shards-{args.shard_size}/*.bin")
+            # random.shuffle(all_shards)  # shuffling based on shards not individual lines
+            # val_shards_count = int(args.train_dev_split * len(all_shards))
+            # val_shards = all_shards[:val_shards_count]
+            # train_shards = all_shards[val_shards_count:]
+            
+            logger.info(f"Total train shards: {len(train_shards)}")
+            logger.info(f"Total validation shards: {len(val_shards)}")
+            
             # TODO: if MMapTextDataset._combining_shards is very slow for large files, it can be skipped but we nned to
             # update the dataset to read from multiple shards directly
-            MMapTextDataset._combine_shards(f"{args.output_dir}/cache/val.bin", val_shards)
+            # MMapTextDataset._combine_shards(f"{args.output_dir}/cache/val.bin", val_shards)
             MMapTextDataset._combine_shards(f"{args.output_dir}/cache/train.bin", train_shards)
 
         elif args.data_type == "tfrecord":
