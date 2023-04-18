@@ -2,6 +2,7 @@
 eval "$(conda shell.bash hook)"
 conda activate pretrain-gpt
 export CUDA_VISIBLE_DEVICES=0,1
+export 'PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512'
 python gpt_pretrain.py    \
     --save_prefix gpt2_large_bs512_lr0.0020_warmup3k_seqlen1024_2gpu \
     --gpu_count 2 \
