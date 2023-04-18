@@ -1,4 +1,8 @@
 local_cache/*
+saved_models/
+wandb/
+runs/
+*.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
