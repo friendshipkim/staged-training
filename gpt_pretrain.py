@@ -173,10 +173,11 @@ def main(args):
     # it is used by the trainer, and certain return variables
     # from the model are automatically logged
     # logger = TestTubeLogger(save_dir=args.save_dir, name=args.save_prefix, version=0)  # always use version=0
-    logger = WandbLogger(project="gpt2-pretraining", name=f"{args.save_prefix}",)
+    wandb_logger = WandbLogger(project="gpt2-pretraining", name=f"{args.save_prefix}",)
 
     # log gradients and learning rate
-    logger.watch(pretrainer)
+    wandb_logger.watch(pretrainer)
+    # TODO: init wandb only once, maybe turn off watch?
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     checkpoint_callback = ModelCheckpoint(
@@ -193,8 +194,14 @@ def main(args):
         # monitor='val_loss',
         # mode='min',
     )
-    args.val_every *= args.grad_accum  # PTL is expecting number of batches_per_gpu
-    print(args.val_every, args.disable_checkpointing, checkpoint_callback.__dict__)
+    
+    # PTL is expecting number of batches_per_gpu
+    args.val_every *= args.grad_accum
+    
+    logger.info(f"Validate every {args.val_every} steps")
+    logger.info(f"Checkpointing?: {not args.disable_checkpointing}")
+    logger.info(checkpoint_callback.__dict__)
+    
     trainer = ptl.Trainer(
         gpus=args.gpu_count,
         num_nodes=args.node_count,
@@ -209,7 +216,7 @@ def main(args):
         limit_val_batches=args.val_batches,
         log_every_n_steps=args.log_rate,
         progress_bar_refresh_rate=args.log_rate,
-        logger=logger,
+        logger=wandb_logger,
         # checkpoint_callback=checkpoint_callback if not args.disable_checkpointing else None,
         accumulate_grad_batches=args.grad_accum,
         resume_from_checkpoint=args.resume,
@@ -234,6 +241,4 @@ def main(args):
 
 if __name__ == "__main__":
     args = create_argument_parser()
-    # parser = Pretrainer.add_args(argparse.ArgumentParser(description="pretrain"))
-    # args = parser.parse_args()
     main(args)
