@@ -25,6 +25,7 @@ def create_argument_parser():
     parser.add_argument("--add_sep_after_doc", action="store_true", default=False, help="add sep token after document")
 
     # Used only at the preprocessing phase
+    parser.add_argument("--shard_only", default=False, action="store_true")
     parser.add_argument("--train_dev_split", type=float, default=0.05)
     parser.add_argument("--shard_size", type=int, default=1024 ** 3 // 4)  # 250MB
     parser.add_argument("--num_preprocessing_workers", type=int, default=1)
@@ -45,7 +46,7 @@ def create_argument_parser():
     parser.add_argument("--size", type=str)
 
     # Checkpointing and logging
-    parser.add_argument("--save_dir", type=str, default="runs/")
+    parser.add_argument("--save_dir", type=str, default="saved_models/")
     parser.add_argument("--save_prefix", type=str, default="test", help="path of output directory is --save_dir/--save_prefix")
     parser.add_argument(
         "--resume",
